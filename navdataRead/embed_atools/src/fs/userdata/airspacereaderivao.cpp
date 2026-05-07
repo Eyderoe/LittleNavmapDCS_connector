@@ -1,0 +1,263 @@
+/*****************************************************************************
+* Copyright 2015-2026 Alexander Barthel alex@littlenavmap.org
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*****************************************************************************/
+
+#include "fs/userdata/airspacereaderivao.h"
+
+#include "fs/util/fsutil.h"
+#include "geo/calculations.h"
+#include "fs/util/coordinates.h"
+#include "fs/common/binarygeometry.h"
+#include "exception.h"
+#include "sql/sqlquery.h"
+#include "sql/sqlutil.h"
+
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+
+using atools::sql::SqlQuery;
+using atools::sql::SqlUtil;
+using atools::geo::Pos;
+using atools::geo::Rect;
+using atools::geo::LineString;
+
+namespace atools {
+namespace fs {
+namespace userdata {
+
+AirspaceReaderIvao::AirspaceReaderIvao(atools::sql::SqlDatabase *sqlDb)
+  : AirspaceReaderBase(sqlDb)
+{
+}
+
+AirspaceReaderIvao::~AirspaceReaderIvao()
+{
+}
+
+// .[
+// .  {
+// .    "airport_id": "SUMU",
+// .    "middle_identifier": null,
+// .    "position": "APP",
+// .    "map_region": [
+// .      {
+// .        "lat": -34.982778,
+// .        "lng": -56.883889
+// .      },
+// .      {
+// .........................
+// .      {
+// .        "lat": -34.983333,
+// .        "lng": -56.883333
+// .      }
+// .    ],
+// .    "type": "TMA",
+// .    "name": "Carrasco Radar"
+// .  },
+// .........................
+// .  {
+// .    "airport_id": "KBNA",
+// .    "middle_identifier": null,
+// .    "position": "DEP",
+// .    "map_region": [],
+// .    "type": "TMA",
+// .    "name": "Nashville Departure"
+// .  },
+// .........................
+// .    ],
+// .    "type": "FIR",
+// .    "name": "Madrid Radar"
+// .  }
+// .]
+//
+// airport_id center_id lat lng map_region middle_identifier name position type
+//
+// .CREATE TABLE boundary (
+// .    boundary_id             INTEGER       PRIMARY KEY,
+// .    file_id                 INTEGER       NOT NULL,
+// .    type                    VARCHAR (15),
+// .    name                    VARCHAR (250),
+// .    restrictive_designation VARCHAR (20),
+// .    restrictive_type        VARCHAR (20),
+// .    multiple_code           VARCHAR (5),
+// .    time_code               VARCHAR (5),
+// .    com_type                VARCHAR (30),
+// .    com_frequency           INTEGER,
+// .    com_name                VARCHAR (50),
+// .    min_altitude_type       VARCHAR (15),
+// .    max_altitude_type       VARCHAR (15),
+// .    min_altitude            INTEGER,
+// .    max_altitude            INTEGER,
+// .    max_lonx                DOUBLE        NOT NULL,
+// .    max_laty                DOUBLE        NOT NULL,
+// .    min_lonx                DOUBLE        NOT NULL,
+// .    min_laty                DOUBLE        NOT NULL,
+// .    geometry                BLOB,
+// .);
+bool AirspaceReaderIvao::readFile(const QString& filenameParam)
+{
+  reset();
+  resetErrors();
+  resetNumRead();
+
+  filename = filenameParam;
+
+  QFile file(filename);
+  if(file.open(QIODevice::ReadOnly | QIODevice::Text))
+  {
+    QJsonParseError error;
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
+    if(error.error == QJsonParseError::NoError)
+    {
+      QJsonArray arr = doc.array();
+      for(int i = 0; i < arr.count(); i++)
+      {
+        QJsonObject obj = arr.at(i).toObject();
+
+        // "position": "APP", -> A
+        // "position": "ATIS", -> null
+        // "position": "CTR", -> C
+        // "position": "DEL", -> CL
+        // "position": "DEP", -> D
+        // "position": "FSS", -> FSS
+        // "position": "GND", -> G
+        // "position": "TWR", -> T
+        QString position = obj.value(QStringLiteral("position")).toString();
+
+        // "type": "FIR",
+        // "type": "TMA",
+        // QString type = obj.value("type").toString();
+
+        QString airportId = obj.value(QStringLiteral("airport_id")).toString();
+        QString middleIdent = obj.value(QStringLiteral("middle_identifier")).toString();
+        QString name = obj.value(QStringLiteral("name")).toString();
+
+        // Fetch geometry ==================================================
+        LineString line;
+        QJsonArray coordinates = obj.value(QStringLiteral("map_region")).toArray();
+        for(int coordIdx = 0; coordIdx < coordinates.count(); coordIdx++)
+        {
+          QJsonObject coordObj = coordinates.at(coordIdx).toObject();
+          line.append(Pos(coordObj.value(QStringLiteral("lng")).toDouble(), coordObj.value(QStringLiteral("lat")).toDouble()));
+        }
+
+        QString dbType = positionToDbType(position);
+
+        if(!dbType.isEmpty() && !airportId.isEmpty())
+        {
+          insertAirspaceQuery->bindValue(QStringLiteral(":boundary_id"), airspaceId++);
+          insertAirspaceQuery->bindValue(QStringLiteral(":file_id"), fileId);
+          insertAirspaceQuery->bindValue(QStringLiteral(":description"), name);
+          insertAirspaceQuery->bindValue(QStringLiteral(":type"), dbType);
+
+          // Unused fields here
+          insertAirspaceQuery->bindNullStr(QStringLiteral(":restrictive_designation"));
+          insertAirspaceQuery->bindNullStr(QStringLiteral(":restrictive_type"));
+          insertAirspaceQuery->bindNullStr(QStringLiteral(":multiple_code"));
+          insertAirspaceQuery->bindValue(QStringLiteral(":time_code"), QStringLiteral("U"));
+
+          // Build ident string like "LEPA_S_TWR" as used in IVAO data JSON ==================
+          QStringList ident({airportId, middleIdent, position});
+          ident.removeAll(QStringLiteral());
+          insertAirspaceQuery->bindValue(QStringLiteral(":name"), ident.join('_'));
+
+          // Get airport position from callback ====================
+          Pos airportPos;
+          if(fetchAirportCoordFunction != nullptr)
+            airportPos = fetchAirportCoordFunction(airportId.toLatin1(), fetchAirportCoordObject);
+
+          Rect bounding = line.boundingRect();
+
+          if(airportPos.isValid() && (line.size() < 3 || bounding.isPoint() || !bounding.isValid()))
+          {
+            // Replace invalid geometry with airport position
+            line.clear();
+            line.append(airportPos);
+            bounding = line.boundingRect();
+          }
+
+          line.removeInvalid();
+          bounding = line.boundingRect();
+
+          if(!line.isEmpty())
+          {
+            insertAirspaceQuery->bindValue(QStringLiteral(":max_lonx"), bounding.getEast());
+            insertAirspaceQuery->bindValue(QStringLiteral(":max_laty"), bounding.getNorth());
+            insertAirspaceQuery->bindValue(QStringLiteral(":min_lonx"), bounding.getWest());
+            insertAirspaceQuery->bindValue(QStringLiteral(":min_laty"), bounding.getSouth());
+
+            // Create geometry blob
+            atools::fs::common::BinaryGeometry geo(atools::fs::util::correctBoundary(line));
+            insertAirspaceQuery->bindValue(QStringLiteral(":geometry"), geo.writeToByteArray());
+
+            insertAirspaceQuery->exec();
+            insertAirspaceQuery->clearBoundValues();
+            numAirspacesRead++;
+          }
+          else
+            qWarning() << Q_FUNC_INFO << "No geometry found" << airportId << middleIdent << position;
+        }
+        else
+          qWarning() << Q_FUNC_INFO << "Invalid type" << airportId << middleIdent << position;
+
+        reset();
+      } // for(int i = 0; i < arr.count(); i++)
+    } // if(error.error == QJsonParseError::NoError)
+    else
+      qWarning() << Q_FUNC_INFO << "Error reading" << filename << error.errorString() << "at offset" << error.offset;
+
+    file.close();
+  }
+  else
+    throw atools::Exception(tr("Cannot open file \"%1\". Reason: %2 (%3)").arg(filename).arg(file.errorString()).arg(file.error()));
+
+  return numAirspacesRead > 0;
+}
+
+QString AirspaceReaderIvao::positionToDbType(const QString& position)
+{
+  if(position == QStringLiteral("APP"))
+    return QStringLiteral("A");
+
+  if(position == QStringLiteral("ATIS"))
+    return QStringLiteral();
+
+  if(position == QStringLiteral("CTR"))
+    return QStringLiteral("C");
+
+  if(position == QStringLiteral("DEL"))
+    return QStringLiteral("CL");
+
+  if(position == QStringLiteral("DEP"))
+    return QStringLiteral("D");
+
+  if(position == QStringLiteral("FSS"))
+    return QStringLiteral("FSS");
+
+  if(position == QStringLiteral("GND"))
+    return QStringLiteral("G");
+
+  if(position == QStringLiteral("TWR"))
+    return QStringLiteral("T");
+
+  return QStringLiteral();
+}
+
+} // namespace userdata
+} // namespace fs
+} // namespace atools

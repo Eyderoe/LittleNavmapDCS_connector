@@ -1,0 +1,117 @@
+/*****************************************************************************
+* Copyright 2015-2026 Alexander Barthel alex@littlenavmap.org
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*****************************************************************************/
+
+#include "fs/xp/xpairwayreader.h"
+
+#include "sql/sqlutil.h"
+#include "sql/sqlquery.h"
+
+using atools::sql::SqlQuery;
+using atools::sql::SqlUtil;
+
+namespace atools {
+namespace fs {
+namespace xp {
+
+// ABCDE K1 11 ABC   K1  3 N 2 180 450 J13
+// ABC   K1 3  DEF   K2  3 N 2 180 450 J13
+// DEF   K2 3  KLMNO K2 11 F 2 180 450 J13-J14-J15
+enum FieldIndex
+{
+  FROM_IDENT = 0,
+  FROM_REGION = 1,
+  FROM_TYPE = 2,
+  TO_IDENT = 3,
+  TO_REGION = 4,
+  TO_TYPE = 5,
+  DIRECTION = 6,
+  TYPE = 7,
+  MIN_ALT = 8,
+  MAX_ALT = 9,
+  NAME = 10
+};
+
+XpAirwayReader::XpAirwayReader(atools::sql::SqlDatabase& sqlDb, const NavDatabaseOptions& opts,
+                               ProgressHandler *progressHandler, atools::fs::NavDatabaseErrors *navdatabaseErrors)
+  : XpReader(sqlDb, opts, progressHandler, navdatabaseErrors)
+{
+  initQueries();
+}
+
+atools::fs::xp::XpAirwayReader::~XpAirwayReader()
+{
+  deInitQueries();
+}
+
+void XpAirwayReader::read(const QStringList& line, const XpReaderContext& context)
+{
+  ctx = &context;
+
+  QString names = at(line, NAME);
+
+  const QStringList nameList = names.split(QStringLiteral("-"));
+  for(const QString& name : nameList)
+  {
+    // Split dash separated airway list
+    insertAirwayQuery->bindValue(QStringLiteral(":tmp_airway_id"), ++curAirwayId);
+    insertAirwayQuery->bindValue(QStringLiteral(":name"), name);
+    insertAirwayQuery->bindValue(QStringLiteral(":type"), at(line, TYPE).toInt());
+    insertAirwayQuery->bindValue(QStringLiteral(":direction"), at(line, DIRECTION));
+    insertAirwayQuery->bindValue(QStringLiteral(":minimum_altitude"), at(line, MIN_ALT).toInt());
+    insertAirwayQuery->bindValue(QStringLiteral(":maximum_altitude"), at(line, MAX_ALT).toInt());
+
+    insertAirwayQuery->bindValue(QStringLiteral(":previous_ident"), at(line, FROM_IDENT));
+    insertAirwayQuery->bindValue(QStringLiteral(":previous_region"), at(line, FROM_REGION));
+    insertAirwayQuery->bindValue(QStringLiteral(":previous_type"), at(line, FROM_TYPE).toInt());
+
+    insertAirwayQuery->bindValue(QStringLiteral(":next_ident"), at(line, TO_IDENT));
+    insertAirwayQuery->bindValue(QStringLiteral(":next_region"), at(line, TO_REGION));
+    insertAirwayQuery->bindValue(QStringLiteral(":next_type"), at(line, TO_TYPE).toInt());
+
+    insertAirwayQuery->exec();
+  }
+}
+
+void XpAirwayReader::finish(const XpReaderContext& context)
+{
+  Q_UNUSED(context)
+}
+
+void XpAirwayReader::reset()
+{
+
+}
+
+void XpAirwayReader::initQueries()
+{
+  deInitQueries();
+
+  SqlUtil util(&db);
+
+  insertAirwayQuery = new SqlQuery(db);
+  insertAirwayQuery->prepare(util.buildInsertStatement(QStringLiteral("tmp_airway")));
+}
+
+void XpAirwayReader::deInitQueries()
+{
+  delete insertAirwayQuery;
+  insertAirwayQuery = nullptr;
+}
+
+} // namespace xp
+} // namespace fs
+} // namespace atools

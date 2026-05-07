@@ -1,0 +1,279 @@
+/*****************************************************************************
+* Copyright 2015-2026 Alexander Barthel alex@littlenavmap.org
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*****************************************************************************/
+
+#include "io/binarystream.h"
+
+#include <QFile>
+#include <QDebug>
+#include <QUuid>
+#include <QFileInfo>
+#include "exception.h"
+
+namespace atools {
+namespace io {
+
+/* Default intel / little
+ * Big endian 1A2B3C4D = 1A 2B 3C 4D in mem
+ * Little endian 1A2B3C4D =  4D 3C 2B 1A in mem
+ */
+BinaryStream::BinaryStream(QFile *binaryFile, QDataStream::ByteOrder order)
+  : is(binaryFile), filename(binaryFile->fileName()), filesize(binaryFile->size())
+{
+  is.setByteOrder(order);
+  checkStream("constructor");
+}
+
+quint32 BinaryStream::readUInt()
+{
+  quint32 retval;
+  is >> retval;
+
+  checkStream("readInt");
+
+  return retval;
+}
+
+quint64 BinaryStream::readULong()
+{
+  quint64 retval;
+  is >> retval;
+
+  checkStream("readLong");
+
+  return retval;
+}
+
+int BinaryStream::readBytes(char bytes[], int size)
+{
+  int numRead = is.readRawData(bytes, size);
+  checkStream("readBytes");
+  return numRead;
+}
+
+int BinaryStream::readUBytes(unsigned char bytes[], int size)
+{
+  int numRead = is.readRawData(reinterpret_cast<char *>(bytes), size);
+  checkStream("readBytes");
+  return numRead;
+}
+
+QUuid BinaryStream::readUuid()
+{
+  uint l = readUInt();
+  ushort w1, w2;
+  w1 = readUShort();
+  w2 = readUShort();
+
+  unsigned char bytes[8];
+  readUBytes(bytes, 8);
+  return QUuid(l, w1, w2, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]);
+}
+
+qint64 BinaryStream::tellg() const
+{
+  checkStream("tellg");
+  return is.device()->pos();
+}
+
+void BinaryStream::skip(qint64 bytes)
+{
+  checkStream("skip");
+  if(bytes != 0)
+    is.device()->seek(tellg() + bytes);
+}
+
+void BinaryStream::seekg(qint64 pos)
+{
+  checkStream("seekg");
+  is.device()->seek(pos);
+}
+
+QString BinaryStream::getFilename() const
+{
+  return QFileInfo(getFilepath()).fileName();
+}
+
+float BinaryStream::readFloat()
+{
+  // Needs special convertion from BGL float
+  union
+  {
+    quint32 intValue;
+    float floatValue;
+  } u;
+
+  u.intValue = readUInt();
+
+  checkStream("readFloat");
+
+  return u.floatValue;
+}
+
+quint16 BinaryStream::readUShort()
+{
+  quint16 retval;
+  is >> retval;
+
+  checkStream("readShort");
+
+  return retval;
+}
+
+quint8 BinaryStream::readUByte()
+{
+  quint8 retval;
+  is >> retval;
+
+  checkStream("readByte");
+
+  return retval;
+}
+
+qint16 BinaryStream::readShort()
+{
+  qint16 retval;
+  is >> retval;
+
+  checkStream("readShort");
+
+  return retval;
+}
+
+qint32 BinaryStream::readInt()
+{
+  qint32 retval;
+  is >> retval;
+
+  checkStream("readInt");
+
+  return retval;
+}
+
+qint64 BinaryStream::readLong()
+{
+  qint64 retval;
+  is >> retval;
+
+  checkStream("readLong");
+
+  return retval;
+}
+
+qint8 BinaryStream::readByte()
+{
+  qint8 retval;
+  is >> retval;
+
+  checkStream("readByte");
+
+  return retval;
+}
+
+QChar BinaryStream::readChar()
+{
+  return QChar::fromLatin1(readByte());
+}
+
+QString BinaryStream::readString(Encoding encoding)
+{
+  QByteArray retval;
+  char c = 0;
+  do
+  {
+    c = readByte();
+    if(c == '\0')
+      break;
+
+    retval.append(c);
+  } while(c != '\0');
+
+  checkStream("readString");
+
+  if(encoding == UTF8)
+    return QString::fromUtf8(retval);
+  else if(encoding == LATIN1)
+    return QString::fromLatin1(retval);
+  else
+    return QString::fromLocal8Bit(retval);
+}
+
+QString BinaryStream::readString(int length, Encoding encoding)
+{
+  // Read the whole length into memory
+  char *buf = new char[static_cast<size_t>(length)];
+  readBytes(buf, length);
+
+  // QByteArray always appends null terminator
+  QByteArray retval;
+  for(int i = 0; i < length; i++)
+  {
+    if(buf[i] == '\0')
+      break;
+
+    retval.append(buf[i]);
+  }
+  delete[] buf;
+
+  if(retval.isEmpty())
+    return QStringLiteral();
+  else if(encoding == UTF8)
+    return QString::fromUtf8(retval);
+  else if(encoding == LATIN1)
+    return QString::fromLatin1(retval);
+  else
+    return QString::fromLocal8Bit(retval);
+}
+
+void BinaryStream::checkStream(const QString& what) const
+{
+  if(is.status() != QDataStream::Ok)
+  {
+    QString statusText(tr("Unknown"));
+    switch(is.status())
+    {
+      case QDataStream::Ok:
+        statusText = tr("No error");
+        break;
+
+      case QDataStream::ReadPastEnd:
+        statusText = tr("Read past file end");
+        break;
+
+      case QDataStream::ReadCorruptData:
+        statusText = tr("Read corrupted data");
+        break;
+
+      case QDataStream::WriteFailed:
+        statusText = tr("Write failed");
+        break;
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
+      case QDataStream::SizeLimitExceeded:
+        statusText = tr("Size limit exceeded");
+        break;
+#endif
+    }
+
+    QString msg = tr("%1 for file \"%2\" failed. Reason: %3 (%4).").arg(what).arg(getFilepath()).arg(statusText).arg(is.status());
+
+    qWarning() << msg << "Position" << Qt::hex << "0x" << is.device()->pos() << Qt::dec << is.device()->pos();
+    throw Exception(msg);
+  }
+}
+
+} /* namespace io */
+} // namespace atools

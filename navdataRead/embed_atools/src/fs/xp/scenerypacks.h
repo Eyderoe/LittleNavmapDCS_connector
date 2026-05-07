@@ -1,0 +1,117 @@
+/*****************************************************************************
+* Copyright 2015-2025 Alexander Barthel alex@littlenavmap.org
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*****************************************************************************/
+
+#ifndef ATOOLS_XP_XPSCENERYPACKS_H
+#define ATOOLS_XP_XPSCENERYPACKS_H
+
+#include <QCoreApplication>
+#include <QHash>
+#include <QList>
+
+namespace atools {
+namespace fs {
+namespace xp {
+
+struct SceneryPack
+{
+  QString filepath /* File path to apt.dat if exists or base directory if not valid */,
+          pathstr /* Short name as read from the ini file */,
+          errorText /* Error message to display if base path is not valid */;
+
+  bool disabled /* Disable by SCENERY_PACK_DISABLED */,
+       valid /* File exists */,
+       globalAirports /* Read order for global airports */;
+
+  int errorLine /* Line number in file */;
+};
+
+QDebug operator<<(QDebug out, const SceneryPack& type);
+
+/*
+ * Reads X-Plane scenery_packs.ini and returns a list with missing paths for error reports and valid
+ * entries (disabled or not).
+ *
+ * X-Plane 11/Custom Scenery/scenery_packs.ini
+ *
+ * XP11 ================================
+ * I
+ * 1000 Version
+ * SCENERY
+ *
+ * SCENERY_PACK Custom Scenery/X-Plane Landmarks - Chicago/
+ * SCENERY_PACK Custom Scenery/2NC0_Mountain_Air_by_hapet/
+ * SCENERY_PACK Custom Scenery/A_ENSB_ESCI/
+ * SCENERY_PACK Custom Scenery/Aerodrome NTMU Ua_Huka XPFR/
+ * SCENERY_PACK Custom Scenery/BIGR_Scenery_Pack/
+ *
+ * Listing the pack as SCENERY_PACK_DISABLED disables loading entirely.
+ * Global Airports are excluded and read separately
+ *
+ * XP12 ================================
+ * I
+ * 1000 Version
+ * SCENERY
+ *
+ * SCENERY_PACK Custom Scenery/X-Plane Landmarks - Berlin and Frankfurt/
+ * SCENERY_PACK Custom Scenery/X-Plane Landmarks - Budapest/
+ * SCENERY_PACK Custom Scenery/X-Plane Landmarks - Chicago/
+ * SCENERY_PACK Custom Scenery/X-Plane Landmarks - Dubai/
+ * SCENERY_PACK Custom Scenery/X-Plane Landmarks - Saint Louis/
+ * SCENERY_PACK Custom Scenery/X-Plane Landmarks - San Francisco/
+ * SCENERY_PACK Custom Scenery/X-Plane Landmarks - Sydney/
+ * SCENERY_PACK Custom Scenery/X-Plane Landmarks - Washington DC/
+ * SCENERY_PACK *GLOBAL_AIRPORTS*
+ *
+ */
+class SceneryPacks
+{
+  Q_DECLARE_TR_FUNCTIONS(XpSceneryPacks)
+
+public:
+  SceneryPacks();
+  ~SceneryPacks();
+
+  /* Read file and fill entries list. */
+  void read(const QString& basePath);
+
+  static bool exists(const QString& basePath, QStringList& errors, QString& filepath);
+
+  /* Get list of entries from file after calling read */
+  const QList<SceneryPack>& getEntries() const;
+
+  /* Get an entry by absolute path. Returns null if it does not exist or path does not exist */
+  const SceneryPack *getEntryByPath(const QString& filepath) const;
+
+  int getFileVersion() const
+  {
+    return fileVersion;
+  }
+
+private:
+  QList<SceneryPack> entries;
+
+  /* Absolute path to index in entry list */
+  QHash<QString, int> index;
+  int fileVersion;
+
+};
+
+} // namespace xp
+} // namespace fs
+} // namespace atools
+
+#endif // ATOOLS_XP_XPSCENERYPACKS_H

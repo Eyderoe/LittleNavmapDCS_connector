@@ -1,0 +1,108 @@
+/*****************************************************************************
+* Copyright 2015-2026 Alexander Barthel alex@littlenavmap.org
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*****************************************************************************/
+
+#include "fs/bgl/ap/rw/runwayvasi.h"
+#include "io/binarystream.h"
+
+namespace atools {
+namespace fs {
+namespace bgl {
+
+using atools::io::BinaryStream;
+
+QString RunwayVasi::vasiTypeToStr(rw::VasiType type)
+{
+  switch(type)
+  {
+    case rw::NONE:
+      return QStringLiteral("NONE");
+
+    case rw::VASI21:
+      return QStringLiteral("VASI21");
+
+    case rw::VASI31:
+      return QStringLiteral("VASI31");
+
+    case rw::VASI22:
+      return QStringLiteral("VASI22");
+
+    case rw::VASI32:
+      return QStringLiteral("VASI32");
+
+    case rw::VASI23:
+      return QStringLiteral("VASI23");
+
+    case rw::VASI33:
+      return QStringLiteral("VASI33");
+
+    case rw::PAPI2:
+      return QStringLiteral("PAPI2");
+
+    case rw::PAPI4:
+      return QStringLiteral("PAPI4");
+
+    case rw::TRICOLOR:
+      return QStringLiteral("TRICOLOR");
+
+    case rw::PVASI:
+      return QStringLiteral("PVASI");
+
+    case rw::TVASI:
+      return QStringLiteral("TVASI");
+
+    case rw::BALL:
+      return QStringLiteral("BALL");
+
+    case rw::APAP_PANELS:
+      return QStringLiteral("APAP_PANELS");
+  }
+  qWarning().nospace().noquote() << "Invalid VASI type " << type;
+  return QStringLiteral("INVALID");
+}
+
+RunwayVasi::RunwayVasi()
+  : type(atools::fs::bgl::rw::NONE), pitch(0.0)
+{
+}
+
+RunwayVasi::RunwayVasi(const NavDatabaseOptions *options, BinaryStream *stream)
+  : Record(options, stream)
+{
+  type = static_cast<rw::VasiType>(stream->readShort());
+  stream->skip(12); // TODO BiasX  BiasZ  Spacing
+  pitch = stream->readFloat();
+}
+
+QDebug operator<<(QDebug out, const RunwayVasi& record)
+{
+  QDebugStateSaver saver(out);
+
+  out.nospace().noquote() << static_cast<const Record&>(record)
+                          << " Vasi[type " << RunwayVasi::vasiTypeToStr(record.type)
+                          << ", pitch " << record.pitch
+                          << "]";
+
+  return out;
+}
+
+RunwayVasi::~RunwayVasi()
+{
+}
+
+} // namespace bgl
+} // namespace fs
+} // namespace atools

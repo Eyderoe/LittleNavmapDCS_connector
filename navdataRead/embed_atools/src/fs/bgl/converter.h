@@ -1,0 +1,89 @@
+/*****************************************************************************
+* Copyright 2015-2025 Alexander Barthel alex@littlenavmap.org
+*
+* This program is free software: you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation, either version 3 of the License, or
+* (at your option) any later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*****************************************************************************/
+
+#ifndef ATOOLS_BGL_CONVERTER_H
+#define ATOOLS_BGL_CONVERTER_H
+
+#include <QString>
+#include <time.h>
+
+namespace atools {
+namespace fs {
+namespace bgl {
+namespace converter {
+
+/*
+ * Converts the BGL specific coordinate format to degrees
+ * @return longitude degrees
+ */
+inline double intToLonX(int lonX)
+{
+  return (lonX * (360. / (3. * 0x10000000))) - 180.;
+}
+
+/*
+ * Converts the BGL specific coordinate format to degrees
+ * @return latitude degrees
+ */
+inline double intToLatY(int latY)
+{
+  return 90. - latY * (180. / (2. * 0x10000000));
+}
+
+/* Get the time in seconds since epoch from the BGL header specific format */
+time_t filetime(unsigned int lowDateTime, unsigned int highDateTime);
+
+/*
+ * Convert the BGL ICAO format to string for FSX, P3D and MSFS 2020
+ * Max of five characters into four bytes.
+ * @param noBitShift if true do not shift 5 bits to the right before decoding
+ */
+QString intToIcao(unsigned int icao, bool noBitShift = false);
+
+/*
+ * Convert the BGL ICAO format to string using MSFS 2024 eight character format.
+ * Uses a different bit shift of 6.
+ * Max of eight characters into six or eight bytes.
+ * @param noBitShift if true do not shift 6 bits to the right before decoding
+ */
+QString intToIcaoLong(quint64 icao, bool noBitShift = false);
+
+/*
+ * Convert BGL runway designator number to a string like "L", "C", "R" or "W"
+ */
+QString designatorStr(int designator);
+
+/*
+ * Create a full runway name from number and designator. Number is always two digits except special codes like "N" or "E".
+ * @return Runway name like "12", "24C" or "NE"
+ */
+QString runwayToStr(int runwayNumber, int designator);
+
+/*
+ * Adjust FS magvar values to positive/negative values where value < 0 for West and value > 0 for East
+ */
+inline float adjustMagvar(float magVar)
+{
+  return -(magVar > 180.f ? magVar - 360.f : magVar);
+}
+
+} // namespace  converter
+} // namespace bgl
+} // namespace fs
+} // namespace atools
+
+#endif // ATOOLS_BGL_CONVERTER_H

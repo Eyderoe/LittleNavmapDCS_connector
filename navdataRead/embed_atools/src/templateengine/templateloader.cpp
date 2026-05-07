@@ -1,0 +1,107 @@
+/**
+ *  @file
+ *  @author Stefan Frings
+ */
+
+#include "templateloader.h"
+#include <QFile>
+#include <QFileInfo>
+#include <QStringList>
+#include <QDir>
+#include <QSet>
+#include <QRegularExpression>
+#include <QCoreApplication>
+
+using namespace stefanfrings;
+
+TemplateLoader::TemplateLoader(QHash<QString, QVariant> settings, QObject *parent)
+  : QObject(parent)
+{
+  templatePath = settings.value("path", ".").toString();
+  // Convert relative path to absolute, based on the directory of the application.
+  if(QDir::isRelativePath(templatePath))
+  {
+    // Use the directory that contains the application executable
+    templatePath = QFileInfo(QCoreApplication::applicationDirPath(), templatePath).absoluteFilePath();
+  }
+  fileNameSuffix = settings.value("suffix", ".tpl").toString();
+  qDebug("TemplateLoader: path=%s", qPrintable(templatePath));
+}
+
+TemplateLoader::~TemplateLoader()
+{
+
+}
+
+QString TemplateLoader::tryFile(QString localizedName)
+{
+  QString fileName = templatePath + "/" + localizedName + fileNameSuffix;
+  qDebug("TemplateCache: trying file %s", qPrintable(fileName));
+  QFile file(fileName);
+  if(file.exists())
+  {
+    static_cast<void>(file.open(QIODevice::ReadOnly));
+    QString document = file.readAll();
+    file.close();
+    if(file.error())
+    {
+      qCritical("TemplateLoader: cannot load file %s, %s", qPrintable(fileName), qPrintable(file.errorString()));
+      return "";
+    }
+    else
+    {
+      return document;
+    }
+  }
+  return "";
+}
+
+Template TemplateLoader::getTemplate(QString templateName, QString locales)
+{
+  QSet<QString> tried; // used to suppress duplicate attempts
+
+  QStringList locs = locales.split(',', Qt::SkipEmptyParts);
+
+  // Search for exact match
+  foreach(QString loc, locs)
+  {
+    loc.replace(QRegularExpression(";.*"), "");
+    loc.replace('-', '_');
+    QString localizedName = templateName + "-" + loc.trimmed();
+    if(!tried.contains(localizedName))
+    {
+      QString document = tryFile(localizedName);
+      if(!document.isEmpty())
+      {
+        return Template(document, localizedName);
+      }
+      tried.insert(localizedName);
+    }
+  }
+
+  // Search for correct language but any country
+  foreach(QString loc, locs)
+  {
+    loc.replace(QRegularExpression("[;_-].*"), "");
+    QString localizedName = templateName + "-" + loc.trimmed();
+    if(!tried.contains(localizedName))
+    {
+      QString document = tryFile(localizedName);
+      if(!document.isEmpty())
+      {
+        return Template(document, localizedName);
+      }
+      tried.insert(localizedName);
+    }
+  }
+
+  // Search for default file
+  QString document = tryFile(templateName);
+  if(!document.isEmpty())
+  {
+    return Template(document, templateName);
+  }
+
+  qCritical("TemplateCache: cannot find template %s", qPrintable(templateName));
+  return Template("", templateName);
+}
