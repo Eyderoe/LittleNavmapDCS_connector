@@ -18,13 +18,8 @@ find_package(Qt6 COMPONENTS
         Core5Compat
         REQUIRED)
 
-# 1.将 DCS 数据导出为 XPlane 格式
-add_executable(dataTrans navdataTrans/navdataTransMain.cpp)
-target_link_libraries(dataTrans
-        Qt::Core
-)
-# 2.通过伪 X-Plane 目录生成数据库
-set(DATAREAD_EMBED_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/navdataRead/embed_atools")
+# 通过伪 X-Plane 目录生成数据库
+set(DATAREAD_EMBED_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/embed_atools")
 file(GLOB_RECURSE DATAREAD_ATOOLS_SOURCES CONFIGURE_DEPENDS
         "${DATAREAD_EMBED_ROOT}/src/*.cpp"
         "${DATAREAD_EMBED_ROOT}/src/*.c"
@@ -43,7 +38,7 @@ list(FILTER DATAREAD_ATOOLS_SOURCES EXCLUDE REGEX ".*/timezone/main\\.cpp$")
 # 纯 CLI：不编译依赖 QtGui/QtWidgets 的 util（QPainter、QTableView、QPolygonF 等），导航编译不需要
 list(FILTER DATAREAD_ATOOLS_SOURCES EXCLUDE REGEX ".*/(htmlbuilder|csvexporter|paintercontextsaver|polygontools|roundedpolygon)\\.cpp$")
 add_executable(dataRead
-        navdataRead/navdataReadMain.cpp
+        navdataReadMain.cpp
         ${DATAREAD_ATOOLS_SOURCES}
         "${DATAREAD_EMBED_ROOT}/atools.qrc"
 )
